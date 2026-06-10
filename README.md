@@ -70,7 +70,7 @@ Text is split with `RecursiveCharacterTextSplitter` (1000 chars, 200 overlap, sp
 │   │   ├── Chat.jsx              # Message list, input, streaming cursor
 │   │   ├── index.css              # Design tokens (OKLCH), global resets, Inter font
 │   │   └── *.module.css            # Component-scoped styles
-│   ├── nginx.conf            # Static file server config (used in Docker)
+│   ├── nginx.conf.template   # Static file server config, $PORT templated (used in Docker)
 │   └── Dockerfile
 ├── Dockerfile               # Backend container (FastAPI + uvicorn)
 ├── docker-compose.yml       # Runs backend + frontend together

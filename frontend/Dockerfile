@@ -18,6 +18,11 @@ RUN npm run build
 FROM nginx:alpine
 
 COPY --from=build /app/dist /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
 
+# Templated config: the base image's entrypoint runs envsubst on
+# *.template files, substituting ${PORT} before nginx starts.
+COPY nginx.conf.template /etc/nginx/templates/default.conf.template
+
+# Railway sets $PORT at runtime; default to 80 for local/Docker Compose use.
+ENV PORT=80
 EXPOSE 80
