@@ -1,0 +1,462 @@
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.spinning {
+  animation: spin 0.8s linear infinite;
+  display: inline-block;
+}
+
+.sidebar {
+  width: var(--sidebar-w);
+  min-width: var(--sidebar-w);
+  height: 100%;
+  background: var(--bg-sidebar);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  flex-shrink: 0;
+  transition: width 180ms ease, min-width 180ms ease;
+}
+
+.sidebarCollapsed {
+  width: 44px;
+  min-width: 44px;
+}
+
+.sidebarBody {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  min-height: 49px;
+}
+
+.brandCollapsed {
+  justify-content: center;
+  padding: 10px 0;
+}
+
+.brandName {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+
+.collapseBtn {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius);
+  color: var(--text-3);
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+}
+
+.collapseBtn:hover {
+  background: var(--bg-raised);
+  color: var(--text);
+}
+
+.collapseBtn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.section {
+  padding: 12px;
+  flex-shrink: 0;
+}
+
+.sessionList {
+  flex-grow: 1;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.sessionItem {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background var(--transition);
+  outline: none;
+}
+
+.sessionItem:hover {
+  background: var(--bg-raised);
+}
+
+.sessionItem:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.sessionItemActive {
+  background: var(--accent-dim);
+  color: var(--text);
+}
+
+.sessionItemActive:hover {
+  background: var(--accent-dim);
+}
+
+.sessionName {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+.sessionItemActive .sessionName {
+  color: var(--text);
+}
+
+.deleteBtn {
+  opacity: 0;
+  background: none;
+  border: none;
+  color: var(--text-3);
+  padding: 2px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: opacity var(--transition), color var(--transition), background var(--transition);
+  flex-shrink: 0;
+}
+
+.sessionItem:hover .deleteBtn {
+  opacity: 1;
+}
+
+.deleteBtn:hover {
+  color: var(--danger);
+  background: var(--bg-raised);
+}
+
+.deleteBtn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  opacity: 1;
+}
+
+.newChatBtn {
+  width: 100%;
+  padding: 8px 12px;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: var(--radius);
+  font-weight: 500;
+  font-size: 13px;
+  transition: background var(--transition);
+  cursor: pointer;
+}
+
+.newChatBtn:hover {
+  background: var(--accent-hov);
+}
+
+.newChatBtn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.newChatBtn:active {
+  background: var(--accent-hov);
+}
+
+.uploadBtn {
+  width: 100%;
+  padding: 7px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 13px;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: border-color var(--transition), color var(--transition), background var(--transition);
+}
+
+.uploadBtn:hover:not(:disabled) {
+  border-color: var(--border-hov);
+  color: var(--text);
+}
+
+.uploadBtn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.uploadBtn:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+/* Compact upload button used inside the kb header row */
+.uploadBtnSmall {
+  padding: 3px 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 11px;
+  color: var(--text-2);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color var(--transition), color var(--transition), background var(--transition);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.uploadBtnSmall:hover:not(:disabled) {
+  border-color: var(--border-hov);
+  color: var(--text);
+}
+
+.uploadBtnSmall:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.uploadBtnSmall:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.kbHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+/* Filter accordion toggle */
+.filterToggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  margin-top: 6px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--transition), border-color var(--transition);
+}
+
+.filterToggle:hover {
+  border-color: var(--border-hov);
+}
+
+.filterToggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.filterLabel {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text-2);
+  font-weight: 500;
+}
+
+.countBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 17px;
+  height: 15px;
+  padding: 0 4px;
+  background: var(--border-hov);
+  border-radius: 8px;
+  font-size: 10px;
+  color: var(--text-2);
+  font-weight: 600;
+}
+
+.activeBadge {
+  font-size: 10px;
+  color: var(--accent);
+  font-weight: 500;
+  background: var(--accent-dim);
+  padding: 1px 6px;
+  border-radius: 8px;
+  white-space: nowrap;
+}
+
+.chevron {
+  color: var(--text-3);
+  flex-shrink: 0;
+  transition: transform 220ms ease;
+}
+
+.chevronOpen {
+  transform: rotate(180deg);
+}
+
+/* Sliding panel */
+.docPanel {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 240ms ease;
+}
+
+.docPanelOpen {
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.caption {
+  font-size: 11px;
+  color: var(--text-3);
+  margin-bottom: 6px;
+}
+
+.docItem {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 0;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-2);
+  transition: color var(--transition);
+  outline: none;
+  user-select: none;
+}
+
+.docItem:hover {
+  color: var(--text);
+}
+
+.docItem:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border-hov);
+  flex-shrink: 0;
+  transition: background var(--transition), border-color var(--transition);
+}
+
+.dotActive {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.docName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.actionRow {
+  display: flex;
+  gap: 6px;
+}
+
+.actionBtn {
+  flex: 1;
+  padding: 6px 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 12px;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition), color var(--transition);
+}
+
+.actionBtn:hover {
+  background: var(--bg-raised);
+  border-color: var(--border-hov);
+  color: var(--text);
+}
+
+.actionBtn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.actionBtn:active {
+  background: var(--bg-raised);
+}
+
+.clearBtn {
+  width: 100%;
+  margin-top: 6px;
+  padding: 6px 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 12px;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition), color var(--transition);
+}
+
+.clearBtn:hover {
+  background: var(--bg-raised);
+  border-color: var(--border-hov);
+  color: var(--danger);
+}
+
+.clearBtn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.clearBtn:active {
+  background: var(--bg-raised);
+}
+
+.divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 4px 12px;
+  flex-shrink: 0;
+}
+
+.error {
+  font-size: 11px;
+  color: var(--danger);
+  margin-top: 4px;
+}

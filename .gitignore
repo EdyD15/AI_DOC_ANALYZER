@@ -1,2 +1,29 @@
+# Secrets
 .env
 .streamlit/secrets.toml
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Vector database (large binary files, rebuilt from documents)
+vector_db/
+
+# Chat history database
+chat_history.db
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Runtime logs
+*.log
+
+# PyInstaller build artifacts
+build/
+dist/
+
+# Local Claude Code settings/state (machine-specific)
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
