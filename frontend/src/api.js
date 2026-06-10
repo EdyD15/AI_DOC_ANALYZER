@@ -1,4 +1,8 @@
-const BASE = ''  // Vite proxy handles /api → localhost:8000
+// In dev, BASE is empty and Vite proxies /api → localhost:8000.
+// In production builds, set VITE_API_URL to the backend's full URL
+// (e.g. https://aidocanalyzer-production.up.railway.app) so the
+// frontend can call it directly when served from a different origin.
+const BASE = import.meta.env.VITE_API_URL || ''
 
 // Documents
 export async function listDocuments() {

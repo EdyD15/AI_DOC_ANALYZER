@@ -70,7 +70,7 @@ Text is split with `RecursiveCharacterTextSplitter` (1000 chars, 200 overlap, sp
 │   │   ├── Chat.jsx              # Message list, input, streaming cursor
 │   │   ├── index.css              # Design tokens (OKLCH), global resets, Inter font
 │   │   └── *.module.css            # Component-scoped styles
-│   ├── nginx.conf            # Reverse proxy config (used in Docker)
+│   ├── nginx.conf            # Static file server config (used in Docker)
 │   └── Dockerfile
 ├── Dockerfile               # Backend container (FastAPI + uvicorn)
 ├── docker-compose.yml       # Runs backend + frontend together
@@ -112,8 +112,12 @@ docker compose up --build
 
 This builds and starts both containers:
 - `backend` — FastAPI/uvicorn on `:8000`
-- `frontend` — Vite build served by nginx on `:5173`, proxying `/api/*` to `backend:8000`
+- `frontend` — Vite build served by nginx on `:5173`, built with `VITE_API_URL=http://localhost:8000` so it calls the backend directly
 
 Requires an `.env` file in the project root with `OPENAI_API_KEY=sk-...`. `./vector_db` and `./chat_history.db` are bind-mounted so data persists across restarts — `chat_history.db` must already exist as a file before the first run.
+
+## Deploying to Railway
+
+Backend and frontend deploy as two separate Railway services from the same repo — see [CLAUDE.md](CLAUDE.md#deploying-to-railway) for service config and required env vars (`VITE_API_URL`, `ALLOWED_ORIGINS`).
 
 See [CLAUDE.md](CLAUDE.md) for detailed architecture notes and design system conventions.

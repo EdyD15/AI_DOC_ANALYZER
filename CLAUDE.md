@@ -47,9 +47,23 @@ docker compose up --build
 
 This builds and starts both containers:
 - `backend` — FastAPI/uvicorn on `:8000`
-- `frontend` — Vite build served by nginx on `:5173`, which proxies `/api/*` to `backend:8000` (mirrors the Vite dev proxy)
+- `frontend` — Vite build served by nginx on `:5173`. The build is given `VITE_API_URL=http://localhost:8000` (see `docker-compose.yml`), so the browser calls the backend directly via its host-mapped port — nginx only serves static files, no `/api` proxy.
 
 Requires an `.env` file in the project root with `OPENAI_API_KEY=sk-...` (Compose reads it automatically). `./vector_db` and `./chat_history.db` are bind-mounted into the backend container so data persists across restarts — `chat_history.db` must already exist as a file (an empty SQLite file, e.g. via `New-Item chat_history.db`) before the first run on a fresh checkout, otherwise Docker creates it as a directory.
+
+## Deploying to Railway
+
+Backend and frontend are deployed as **two separate services** in the same Railway project, each built from its own Dockerfile:
+
+| Service | Root directory | Dockerfile | Env vars |
+|---|---|---|---|
+| backend | `/` (repo root) | `Dockerfile` | `OPENAI_API_KEY`, `ALLOWED_ORIGINS=<frontend-url>` |
+| frontend | `/frontend` | `frontend/Dockerfile` | `VITE_API_URL=<backend-url>` (build-time) |
+
+- `VITE_API_URL` is read in `frontend/src/api.js` and baked into the static build at build time (passed as a Docker `ARG` in `frontend/Dockerfile`) — set it to the backend's public Railway URL, e.g. `https://aidocanalyzer-production.up.railway.app`. The frontend's nginx (`frontend/nginx.conf`) only ever serves static files and has no `/api` proxy or upstream — every API call goes straight from the browser to that URL, so there's no `backend` hostname for nginx to resolve.
+- `ALLOWED_ORIGINS` (comma-separated) is read in `api.py` and appended to the CORS allow-list alongside `http://localhost:5173` — set it to the frontend's public Railway URL.
+- Railway sets `PORT` automatically; the backend Dockerfile's `CMD` binds to `0.0.0.0:8000` — override the start command to `uvicorn api:app --host 0.0.0.0 --port $PORT` if Railway's assigned port differs from 8000. The frontend's nginx listens on `:80`, which Railway maps automatically.
+- `vector_db/` and `chat_history.db` are not persisted on Railway unless a volume is attached to the backend service.
 
 ## Architecture
 

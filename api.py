@@ -1,4 +1,5 @@
 import json
+import os
 import asyncio
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,9 +10,13 @@ import services
 
 app = FastAPI(title="DocuMind API")
 
+# Comma-separated list of extra allowed origins, e.g. the deployed frontend's
+# URL (https://<frontend-service>-production.up.railway.app).
+_extra_origins = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=["http://localhost:5173", *_extra_origins],
     allow_methods=["*"],
     allow_headers=["*"],
 )
