@@ -25,6 +25,26 @@
   min-width: 44px;
 }
 
+@media (max-width: 767px) {
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: min(82vw, 280px);
+    min-width: 0;
+    z-index: 100;
+    box-shadow: 2px 0 16px rgba(0, 0, 0, 0.12);
+    transition: transform 180ms ease;
+  }
+
+  .sidebarCollapsed {
+    width: min(82vw, 280px);
+    min-width: 0;
+    transform: translateX(-100%);
+  }
+}
+
 .sidebarBody {
   display: flex;
   flex-direction: column;

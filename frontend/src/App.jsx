@@ -28,7 +28,8 @@ export default function App() {
   const [loading, setLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState(null)
-  const [sidebarOpen, setSidebarOpen] = useState(true)
+  // Sidebar starts as an overlay drawer (closed) on mobile, persistent (open) on desktop
+  const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 768)
 
   const accumulatorRef = useRef('')
 
@@ -98,10 +99,12 @@ export default function App() {
     setSessionCounter(next)
     setCurrentSession(name)
     setActiveDocs([])
+    if (window.innerWidth < 768) setSidebarOpen(false)
   }
 
   function handleSelectSession(name) {
     setCurrentSession(name)
+    if (window.innerWidth < 768) setSidebarOpen(false)
   }
 
   async function handleDeleteSession(name) {
@@ -273,11 +276,15 @@ export default function App() {
         sidebarOpen={sidebarOpen}
         onToggleSidebar={() => setSidebarOpen(o => !o)}
       />
+      {sidebarOpen && (
+        <div className={styles.backdrop} onClick={() => setSidebarOpen(false)} />
+      )}
       <Chat
         messages={currentMessages}
         onSend={handleSend}
         loading={loading}
         activeDocs={activeDocs}
+        onToggleSidebar={() => setSidebarOpen(o => !o)}
       />
     </div>
   )

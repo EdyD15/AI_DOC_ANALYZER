@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { FileQuestion, ArrowUp, Paperclip, X } from 'lucide-react'
+import { FileQuestion, ArrowUp, Paperclip, X, Menu } from 'lucide-react'
 import styles from './Chat.module.css'
 
 const MAX_INPUT = 5000
@@ -32,7 +32,7 @@ function renderText(text) {
   return nodes
 }
 
-export default function Chat({ messages, onSend, loading, activeDocs }) {
+export default function Chat({ messages, onSend, loading, activeDocs, onToggleSidebar }) {
   const [input, setInput] = useState('')
   const [attachedImage, setAttachedImage] = useState(null) // { file, url }
   const textareaRef = useRef(null)
@@ -95,6 +95,18 @@ export default function Chat({ messages, onSend, loading, activeDocs }) {
 
   return (
     <main className={styles.chat}>
+      {/* Mobile header: sidebar toggle, hidden on desktop */}
+      <div className={styles.mobileHeader}>
+        <button
+          className={styles.menuBtn}
+          onClick={onToggleSidebar}
+          aria-label="Toggle sidebar"
+        >
+          <Menu size={18} />
+        </button>
+        <span className={styles.mobileTitle}>DocuMind</span>
+      </div>
+
       {/* Messages area */}
       {hasMessages ? (
         <div className={styles.messages}>
