@@ -1,6 +1,7 @@
 .shell {
   display: flex;
   height: 100vh;
+  height: 100dvh; /* accounts for mobile browsers' collapsing address bar */
   overflow: hidden;
   background: var(--bg);
 }

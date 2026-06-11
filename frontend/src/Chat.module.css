@@ -170,6 +170,7 @@
 
 .inputArea {
   padding: 12px 24px 20px;
+  padding-bottom: calc(20px + env(safe-area-inset-bottom));
   background: var(--bg);
   flex-shrink: 0;
 }
@@ -346,5 +347,6 @@
 
   .inputArea {
     padding: 8px 12px 14px;
+    padding-bottom: calc(14px + env(safe-area-inset-bottom));
   }
 }
