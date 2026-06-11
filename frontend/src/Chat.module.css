@@ -65,6 +65,7 @@
     align-items: center;
     gap: 8px;
     padding: 10px 12px;
+    padding-top: calc(10px + env(safe-area-inset-top));
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
     min-height: 49px;
@@ -348,5 +349,11 @@
   .inputArea {
     padding: 8px 12px 14px;
     padding-bottom: calc(14px + env(safe-area-inset-bottom));
+  }
+
+  .textarea:placeholder-shown {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 }

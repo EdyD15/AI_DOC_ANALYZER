@@ -43,6 +43,10 @@
     min-width: 0;
     transform: translateX(-100%);
   }
+
+  .brand {
+    padding-top: calc(10px + env(safe-area-inset-top));
+  }
 }
 
 .sidebarBody {
