@@ -1,7 +1,11 @@
 .shell {
   display: flex;
   height: 100vh;
-  height: 100dvh; /* accounts for mobile browsers' collapsing address bar */
+  /* Small viewport height: never taller than the visible area, even when
+     the browser's toolbar is expanded. Since this layout has no page-level
+     scroll, 100dvh can mis-measure on iOS and let the bottom input bar get
+     covered by the toolbar — 100svh avoids that entirely. */
+  height: 100svh;
   overflow: hidden;
   background: var(--bg);
 }
