@@ -137,8 +137,11 @@ export default function App() {
     const name = `Chat ${next}`
     try {
       await saveSession(name, [])
-    } catch {
-      // best effort
+    } catch (err) {
+      if (err instanceof AuthError) {
+        handleLogout()
+        return
+      }
     }
     setSessions(prev => ({ ...prev, [name]: [] }))
     setSessionCounter(next)
@@ -155,8 +158,11 @@ export default function App() {
   async function handleDeleteSession(name) {
     try {
       await deleteSession(name)
-    } catch {
-      // best effort
+    } catch (err) {
+      if (err instanceof AuthError) {
+        handleLogout()
+        return
+      }
     }
 
     setSessions(prev => {
@@ -210,8 +216,11 @@ export default function App() {
     try {
       await saveSession(newName, messages.map(stripForStorage))
       await deleteSession(oldName)
-    } catch {
-      // best effort
+    } catch (err) {
+      if (err instanceof AuthError) {
+        handleLogout()
+        return
+      }
     }
   }
 
@@ -231,6 +240,10 @@ export default function App() {
       const docData = await listDocuments()
       setDocuments(Object.keys(docData || {}))
     } catch (err) {
+      if (err instanceof AuthError) {
+        handleLogout()
+        return
+      }
       setUploadError(err.message || 'Upload failed')
     } finally {
       setUploading(false)
@@ -240,8 +253,11 @@ export default function App() {
   async function handleClearDocs() {
     try {
       await clearDocuments()
-    } catch {
-      // best effort
+    } catch (err) {
+      if (err instanceof AuthError) {
+        handleLogout()
+        return
+      }
     }
     setDocuments([])
     setActiveDocs([])
@@ -251,8 +267,11 @@ export default function App() {
     setSessions(prev => ({ ...prev, [currentSession]: [] }))
     try {
       await saveSession(currentSession, [])
-    } catch {
-      // best effort
+    } catch (err) {
+      if (err instanceof AuthError) {
+        handleLogout()
+        return
+      }
     }
   }
 
