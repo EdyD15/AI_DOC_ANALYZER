@@ -39,6 +39,17 @@ OPENAI_API_KEY = "sk-..."
 
 `services.py` reads the env var first, falls back to `st.secrets`.
 
+## Authentication
+
+JWT-based auth. `auth.py` holds the JWT helpers and the `get_current_user` FastAPI dependency; every route in `api.py` (except `/api/auth/register` and `/api/auth/login`) requires a valid `Authorization: Bearer <token>` header.
+
+- `JWT_SECRET_KEY` env var signs tokens (HS256, 7-day expiry). If unset, `auth.py` falls back to an insecure default and logs a warning — set a real random value locally (`.env`) and on the Railway backend service.
+- `POST /api/auth/register` and `POST /api/auth/login` create/verify users (bcrypt-hashed passwords) in a `users` table in `chat_history.db` and return `{ "access_token": ..., "username": ... }`. `GET /api/auth/me` returns the current user.
+- Each user's documents live in their own ChromaDB collection, `corporate_docs_{user_id}` — full isolation by construction, no metadata filtering needed.
+- `chat_sessions` is keyed by `(user_id, session_name)`.
+- Frontend stores the token + username in `localStorage` (`api.js`); `App.jsx` renders `AuthPage` (`Login.jsx`/`Register.jsx`) when no token is present, and logs the user out (clearing localStorage and resetting state) on any `AuthError` (401) from the API.
+- **Migration note**: introducing auth was a breaking change to the pre-existing `chat_sessions` table (it had no `user_id`) — old anonymous sessions were dropped on first run after upgrading. The old `corporate_docs` ChromaDB collection (pre-auth) is now orphaned; users need to register an account and re-upload their documents.
+
 ## Running with Docker
 
 ```bash
@@ -49,7 +60,7 @@ This builds and starts both containers:
 - `backend` — FastAPI/uvicorn on `:8000`
 - `frontend` — Vite build served by nginx on `:5173`. The build is given `VITE_API_URL=http://localhost:8000` (see `docker-compose.yml`), so the browser calls the backend directly via its host-mapped port — nginx only serves static files, no `/api` proxy.
 
-Requires an `.env` file in the project root with `OPENAI_API_KEY=sk-...` (Compose reads it automatically). `./vector_db` and `./chat_history.db` are bind-mounted into the backend container so data persists across restarts — `chat_history.db` must already exist as a file (an empty SQLite file, e.g. via `New-Item chat_history.db`) before the first run on a fresh checkout, otherwise Docker creates it as a directory.
+Requires an `.env` file in the project root with `OPENAI_API_KEY=sk-...` and `JWT_SECRET_KEY=<random-string>` (Compose reads it automatically). `./vector_db` and `./chat_history.db` are bind-mounted into the backend container so data persists across restarts — `chat_history.db` must already exist as a file (an empty SQLite file, e.g. via `New-Item chat_history.db`) before the first run on a fresh checkout, otherwise Docker creates it as a directory.
 
 ## Deploying to Railway
 
@@ -57,7 +68,7 @@ Backend and frontend are deployed as **two separate services** in the same Railw
 
 | Service | Root directory | Dockerfile | Env vars |
 |---|---|---|---|
-| backend | `/` (repo root) | `Dockerfile` | `OPENAI_API_KEY`, `ALLOWED_ORIGINS=<frontend-url>` |
+| backend | `/` (repo root) | `Dockerfile` | `OPENAI_API_KEY`, `JWT_SECRET_KEY`, `ALLOWED_ORIGINS=<frontend-url>` |
 | frontend | `/frontend` | `frontend/Dockerfile` | `VITE_API_URL=<backend-url>` (build-time) |
 
 - `VITE_API_URL` is read in `frontend/src/api.js` and baked into the static build at build time (passed as a Docker `ARG` in `frontend/Dockerfile`) — set it to the backend's public Railway URL, e.g. `https://aidocanalyzer-production.up.railway.app`. The frontend's nginx only ever serves static files and has no `/api` proxy or upstream — every API call goes straight from the browser to that URL, so there's no `backend` hostname for nginx to resolve.
@@ -67,12 +78,13 @@ Backend and frontend are deployed as **two separate services** in the same Railw
 
 ## Architecture
 
-**DocuMind AI** is a document Q&A RAG app. Three Python files + a React frontend:
+**DocuMind AI** is a document Q&A RAG app. Python backend + a React frontend:
 
 | File | Role |
 |---|---|
-| `services.py` | All backend logic: ChromaDB, document ingestion, OpenAI calls, SQLite chat history, export generation. No UI calls — pure Python. |
+| `services.py` | All backend logic: ChromaDB, document ingestion, OpenAI calls, SQLite chat history, user accounts, export generation. No UI calls — pure Python. |
 | `api.py` | FastAPI layer. Thin — just routes, request parsing, and delegating to `services.py`. |
+| `auth.py` | JWT helpers (`create_access_token`) and the `get_current_user` dependency used to protect routes in `api.py`. |
 | `frontend/src/` | React UI (Vite). See below. |
 | `app.py` | Legacy Streamlit app — still works but no longer the primary UI. |
 
@@ -80,9 +92,11 @@ Backend and frontend are deployed as **two separate services** in the same Railw
 
 | File | Role |
 |---|---|
-| `api.js` | All `fetch` wrappers + the `streamChat` async generator for SSE streaming |
-| `App.jsx` | State management shell: sessions, documents, streaming, upload |
-| `Sidebar.jsx` | Left panel: sessions, upload, doc list/filter, export/clear actions |
+| `api.js` | All `fetch` wrappers + the `streamChat` async generator for SSE streaming + auth (`login`/`register`/`logout`/token storage) |
+| `App.jsx` | State management shell: auth gating, sessions, documents, streaming, upload |
+| `AuthPage.jsx` | Toggles between `Login.jsx` and `Register.jsx` |
+| `Login.jsx` / `Register.jsx` | Auth forms, styled via `Auth.module.css` |
+| `Sidebar.jsx` | Left panel: sessions, upload, doc list/filter, export/clear actions, user info + logout |
 | `Chat.jsx` | Primary surface: message list, input pill, streaming cursor |
 | `index.css` | Design tokens (OKLCH), global resets, Inter font |
 | `*.module.css` | Component-scoped styles |
@@ -96,7 +110,7 @@ Backend and frontend are deployed as **two separate services** in the same Railw
 
 ### Key design decisions
 
-- **ChromaDB** uses `text-embedding-3-small`. Collection: `corporate_docs`. Path resolved from `__file__`.
+- **ChromaDB** uses `text-embedding-3-small`. Per-user collections: `corporate_docs_{user_id}`. Path resolved from `__file__`.
 - **Chunking** uses `RecursiveCharacterTextSplitter` (1000 chars, 200 overlap) with separators `["\n\n", "\n", ". ", ...]` — splits on paragraph/sentence boundaries before falling back to characters.
 - **Image OCR** uses `gpt-4o` vision (20 MB limit). Chat uses `gpt-4o-mini`.
 - **PDF export** uses fpdf2 with latin-1 — non-ASCII chars (emoji, curly quotes) become `?`. DOCX export has no such limit.

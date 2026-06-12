@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { FileQuestion, ArrowUp, Paperclip, X, Menu } from 'lucide-react'
+import { FileText, ArrowUp, Paperclip, X, Menu } from 'lucide-react'
 import styles from './Chat.module.css'
 
 const MAX_INPUT = 5000
@@ -32,7 +32,7 @@ function renderText(text) {
   return nodes
 }
 
-export default function Chat({ messages, onSend, loading, activeDocs, onToggleSidebar }) {
+export default function Chat({ messages, onSend, loading, activeDocs, onToggleSidebar, username }) {
   const [input, setInput] = useState('')
   const [attachedImage, setAttachedImage] = useState(null) // { file, url }
   const textareaRef = useRef(null)
@@ -140,7 +140,11 @@ export default function Chat({ messages, onSend, loading, activeDocs, onToggleSi
         </div>
       ) : (
         <div className={styles.emptyState}>
-          <FileQuestion size={28} color="var(--text-3)" />
+          <div className={styles.emptyBrand}>
+            <FileText size={28} color="var(--accent)" />
+            <span className={styles.emptyBrandText}>DocuMind AI</span>
+          </div>
+          {username && <p className={styles.emptyGreeting}>Hello, {username}!</p>}
           <p className={styles.emptyTitle}>What would you like to know?</p>
           <p className={styles.emptySubtitle}>
             Upload a document and ask anything about it.

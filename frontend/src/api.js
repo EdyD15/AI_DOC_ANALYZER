@@ -4,47 +4,132 @@
 // frontend can call it directly when served from a different origin.
 const BASE = import.meta.env.VITE_API_URL || ''
 
+const TOKEN_KEY = 'documind_token'
+const USERNAME_KEY = 'documind_username'
+
+// Thrown when a request fails authentication (missing/expired/invalid token).
+export class AuthError extends Error {}
+
+export function getToken() {
+  return localStorage.getItem(TOKEN_KEY)
+}
+
+export function getUsername() {
+  return localStorage.getItem(USERNAME_KEY)
+}
+
+function setAuth(token, username) {
+  localStorage.setItem(TOKEN_KEY, token)
+  localStorage.setItem(USERNAME_KEY, username)
+}
+
+export function clearAuth() {
+  localStorage.removeItem(TOKEN_KEY)
+  localStorage.removeItem(USERNAME_KEY)
+}
+
+// Shared fetch wrapper: attaches the bearer token and turns 401s into AuthError.
+async function request(path, options = {}) {
+  const token = getToken()
+  const headers = { ...(options.headers || {}) }
+  if (token) headers['Authorization'] = `Bearer ${token}`
+
+  const r = await fetch(`${BASE}${path}`, { ...options, headers })
+  if (r.status === 401) {
+    clearAuth()
+    throw new AuthError('Unauthorized')
+  }
+  if (!r.ok) {
+    const text = await r.text()
+    try {
+      const data = JSON.parse(text)
+      throw new Error(data.detail || text)
+    } catch (e) {
+      if (e instanceof SyntaxError) throw new Error(text)
+      throw e
+    }
+  }
+  return r
+}
+
+// Auth
+export async function register(username, password) {
+  const r = await fetch(`${BASE}/api/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  })
+  const data = await r.json().catch(() => ({}))
+  if (!r.ok) throw new Error(data.detail || 'Registration failed')
+  setAuth(data.access_token, data.username)
+  return data
+}
+
+export async function login(username, password) {
+  const r = await fetch(`${BASE}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  })
+  const data = await r.json().catch(() => ({}))
+  if (!r.ok) throw new Error(data.detail || 'Login failed')
+  setAuth(data.access_token, data.username)
+  return data
+}
+
+export function logout() {
+  clearAuth()
+}
+
+export async function getMe() {
+  const r = await request('/api/auth/me')
+  return r.json()
+}
+
+export async function changePassword(currentPassword, newPassword) {
+  const r = await request('/api/auth/change-password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+  })
+  return r.json()
+}
+
 // Documents
 export async function listDocuments() {
-  const r = await fetch(`${BASE}/api/documents`)
-  if (!r.ok) throw new Error(await r.text())
+  const r = await request('/api/documents')
   return r.json()  // { filename: "Vectorized", ... }
 }
 
 export async function uploadDocument(file) {
   const fd = new FormData()
   fd.append('file', file)
-  const r = await fetch(`${BASE}/api/documents/upload`, { method: 'POST', body: fd })
-  if (!r.ok) throw new Error(await r.text())
+  const r = await request('/api/documents/upload', { method: 'POST', body: fd })
   return r.json()
 }
 
 export async function clearDocuments() {
-  const r = await fetch(`${BASE}/api/documents`, { method: 'DELETE' })
-  if (!r.ok) throw new Error(await r.text())
+  const r = await request('/api/documents', { method: 'DELETE' })
   return r.json()
 }
 
 // Sessions
 export async function listSessions() {
-  const r = await fetch(`${BASE}/api/sessions`)
-  if (!r.ok) throw new Error(await r.text())
+  const r = await request('/api/sessions')
   return r.json()  // { "Chat 1": [...messages], ... }
 }
 
 export async function saveSession(name, messages) {
-  const r = await fetch(`${BASE}/api/sessions/${encodeURIComponent(name)}`, {
+  const r = await request(`/api/sessions/${encodeURIComponent(name)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ messages }),
   })
-  if (!r.ok) throw new Error(await r.text())
   return r.json()
 }
 
 export async function deleteSession(name) {
-  const r = await fetch(`${BASE}/api/sessions/${encodeURIComponent(name)}`, { method: 'DELETE' })
-  if (!r.ok) throw new Error(await r.text())
+  const r = await request(`/api/sessions/${encodeURIComponent(name)}`, { method: 'DELETE' })
   return r.json()
 }
 
@@ -64,11 +149,20 @@ export async function* streamChat(question, selectedDocuments = [], imageFile = 
     body.image_base64 = await fileToBase64(imageFile)
     body.image_mime = imageFile.type
   }
+
+  const token = getToken()
+  const headers = { 'Content-Type': 'application/json' }
+  if (token) headers['Authorization'] = `Bearer ${token}`
+
   const r = await fetch(`${BASE}/api/chat/stream`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(body),
   })
+  if (r.status === 401) {
+    clearAuth()
+    throw new AuthError('Unauthorized')
+  }
   if (!r.ok) throw new Error(await r.text())
 
   const reader = r.body.getReader()
@@ -97,19 +191,18 @@ export async function* streamChat(question, selectedDocuments = [], imageFile = 
 }
 
 // Export
-export async function exportChat(messages, format) {
+export async function exportChat(messages, format, filename) {
   // format: 'docx' or 'pdf'
-  const r = await fetch(`${BASE}/api/export/${format}`, {
+  const r = await request(`/api/export/${format}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ messages }),
   })
-  if (!r.ok) throw new Error(await r.text())
   const blob = await r.blob()
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = `DocuMind_export.${format}`
+  a.download = filename || `DocuMind_export.${format}`
   a.click()
   URL.revokeObjectURL(url)
 }

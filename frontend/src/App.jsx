@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import Sidebar from './Sidebar'
 import Chat from './Chat'
+import AuthPage from './AuthPage'
 import {
   listSessions,
   listDocuments,
@@ -10,6 +11,11 @@ import {
   clearDocuments,
   streamChat,
   exportChat,
+  getToken,
+  getUsername,
+  getMe,
+  logout,
+  AuthError,
 } from './api.js'
 import styles from './App.module.css'
 
@@ -20,6 +26,8 @@ function stripForStorage(msg) {
 }
 
 export default function App() {
+  const [token, setToken] = useState(() => getToken())
+  const [username, setUsername] = useState(() => getUsername())
   const [sessions, setSessions] = useState({})
   const [currentSession, setCurrentSession] = useState('Chat 1')
   const [sessionCounter, setSessionCounter] = useState(1)
@@ -33,20 +41,40 @@ export default function App() {
 
   const accumulatorRef = useRef('')
 
-  // On mount: load sessions and documents from API
+  // On mount (and after login/register): validate the token, then load
+  // sessions and documents from API
   useEffect(() => {
+    if (!token) return
+
     async function init() {
+      try {
+        await getMe()
+      } catch (err) {
+        if (err instanceof AuthError) {
+          handleLogout()
+          return
+        }
+      }
+
       let [sessionData, docData] = [null, null]
 
       try {
         sessionData = await listSessions()
-      } catch {
+      } catch (err) {
+        if (err instanceof AuthError) {
+          handleLogout()
+          return
+        }
         sessionData = {}
       }
 
       try {
         docData = await listDocuments()
-      } catch {
+      } catch (err) {
+        if (err instanceof AuthError) {
+          handleLogout()
+          return
+        }
         docData = {}
       }
 
@@ -84,7 +112,24 @@ export default function App() {
     }
 
     init()
-  }, [])
+  }, [token])
+
+  // Auth
+  function handleAuthenticated() {
+    setToken(getToken())
+    setUsername(getUsername())
+  }
+
+  function handleLogout() {
+    logout()
+    setToken(null)
+    setUsername(null)
+    setSessions({})
+    setCurrentSession('Chat 1')
+    setSessionCounter(1)
+    setDocuments([])
+    setActiveDocs([])
+  }
 
   // Session management
   async function handleNewChat() {
@@ -141,6 +186,39 @@ export default function App() {
         return { [defaultName]: [] }
       }
       return prev
+    })
+  }
+
+  async function handleRenameSession(oldName, newName) {
+    newName = newName.trim()
+    if (!newName || newName === oldName || sessions[newName] !== undefined) return
+
+    const messages = sessions[oldName] || []
+
+    setSessions(prev => {
+      const updated = {}
+      for (const [key, value] of Object.entries(prev)) {
+        updated[key === oldName ? newName : key] = value
+      }
+      return updated
+    })
+
+    if (currentSession === oldName) {
+      setCurrentSession(newName)
+    }
+
+    try {
+      await saveSession(newName, messages.map(stripForStorage))
+      await deleteSession(oldName)
+    } catch {
+      // best effort
+    }
+  }
+
+  function handleShareSession(name) {
+    const msgs = sessions[name] || []
+    exportChat(msgs, 'pdf', `${name}.pdf`).catch(err => {
+      if (err instanceof AuthError) handleLogout()
     })
   }
 
@@ -233,7 +311,11 @@ export default function App() {
         saveSession(currentSession, finalMessages).catch(() => {})
         return prev
       })
-    } catch {
+    } catch (err) {
+      if (err instanceof AuthError) {
+        handleLogout()
+        return
+      }
       // Rollback: remove user message and AI placeholder
       setSessions(prev => {
         const msgs = prev[currentSession] || []
@@ -250,7 +332,13 @@ export default function App() {
   // Export
   function handleExport(format) {
     const currentMessages = sessions[currentSession] || []
-    exportChat(currentMessages, format).catch(() => {})
+    exportChat(currentMessages, format).catch(err => {
+      if (err instanceof AuthError) handleLogout()
+    })
+  }
+
+  if (!token) {
+    return <AuthPage onAuthenticated={handleAuthenticated} />
   }
 
   const currentMessages = sessions[currentSession] || []
@@ -263,6 +351,8 @@ export default function App() {
         onSelectSession={handleSelectSession}
         onNewChat={handleNewChat}
         onDeleteSession={handleDeleteSession}
+        onRenameSession={handleRenameSession}
+        onShareSession={handleShareSession}
         documents={documents}
         activeDocs={activeDocs}
         onSetActiveDocs={setActiveDocs}
@@ -275,6 +365,8 @@ export default function App() {
         uploadError={uploadError}
         sidebarOpen={sidebarOpen}
         onToggleSidebar={() => setSidebarOpen(o => !o)}
+        username={username}
+        onLogout={handleLogout}
       />
       {sidebarOpen && (
         <div className={styles.backdrop} onClick={() => setSidebarOpen(false)} />
@@ -285,6 +377,7 @@ export default function App() {
         loading={loading}
         activeDocs={activeDocs}
         onToggleSidebar={() => setSidebarOpen(o => !o)}
+        username={username}
       />
     </div>
   )

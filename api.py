@@ -1,11 +1,13 @@
+import io
 import json
 import os
 import asyncio
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, UploadFile, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel
 
+import auth
 import services
 
 app = FastAPI(title="DocuMind API")
@@ -22,41 +24,96 @@ app.add_middleware(
 )
 
 
+# ── Auth ───────────────────────────────────────────────────────────────────────
+
+class RegisterBody(BaseModel):
+    username: str
+    password: str
+
+
+class LoginBody(BaseModel):
+    username: str
+    password: str
+
+
+@app.post("/api/auth/register")
+def register(body: RegisterBody):
+    username = body.username.strip()
+    if len(username) < 3:
+        raise HTTPException(status_code=400, detail="Username must be at least 3 characters.")
+    if len(body.password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters.")
+
+    user = services.create_user(username, body.password)
+    if user is None:
+        raise HTTPException(status_code=409, detail="Username already exists.")
+
+    token = auth.create_access_token(user["id"], user["username"])
+    return {"access_token": token, "token_type": "bearer", "username": user["username"]}
+
+
+@app.post("/api/auth/login")
+def login(body: LoginBody):
+    user = services.authenticate_user(body.username.strip(), body.password)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Invalid username or password.")
+
+    token = auth.create_access_token(user["id"], user["username"])
+    return {"access_token": token, "token_type": "bearer", "username": user["username"]}
+
+
+@app.get("/api/auth/me")
+def get_me(user: dict = Depends(auth.get_current_user)):
+    return {"id": user["id"], "username": user["username"]}
+
+
+class ChangePasswordBody(BaseModel):
+    current_password: str
+    new_password: str
+
+
+@app.post("/api/auth/change-password")
+def change_password(body: ChangePasswordBody, user: dict = Depends(auth.get_current_user)):
+    if len(body.new_password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters.")
+
+    ok = services.change_password(user["id"], body.current_password, body.new_password)
+    if not ok:
+        raise HTTPException(status_code=401, detail="Current password is incorrect.")
+    return {"ok": True}
+
+
 # ── Documents ──────────────────────────────────────────────────────────────────
 
 @app.get("/api/documents")
-def list_documents():
-    return services.get_all_documents_from_db()
+def list_documents(user: dict = Depends(auth.get_current_user)):
+    return services.get_all_documents_from_db(user["id"])
 
 
 @app.post("/api/documents/upload")
-async def upload_document(file: UploadFile = File(...)):
+async def upload_document(file: UploadFile = File(...), user: dict = Depends(auth.get_current_user)):
     content = await file.read()
 
-    class _Buf:
-        def __init__(self, name, data):
-            self.name = name
-            self._data = data
-        def read(self, n=-1):
-            return self._data
+    buf = io.BytesIO(content)
+    buf.name = file.filename
 
-    ok = services.process_and_save_document(_Buf(file.filename, content))
+    ok, error = services.process_and_save_document(buf, user["id"])
     if not ok:
-        raise HTTPException(status_code=422, detail="Could not process document.")
+        raise HTTPException(status_code=422, detail=error or "Could not process document.")
     return {"ok": True, "name": file.filename}
 
 
 @app.delete("/api/documents")
-def clear_documents():
-    services.clear_db()
+def clear_documents(user: dict = Depends(auth.get_current_user)):
+    services.clear_db(user["id"])
     return {"ok": True}
 
 
 # ── Sessions ───────────────────────────────────────────────────────────────────
 
 @app.get("/api/sessions")
-def list_sessions():
-    return services.load_all_chat_sessions()
+def list_sessions(user: dict = Depends(auth.get_current_user)):
+    return services.load_all_chat_sessions(user["id"])
 
 
 class SaveSessionBody(BaseModel):
@@ -64,14 +121,14 @@ class SaveSessionBody(BaseModel):
 
 
 @app.put("/api/sessions/{name}")
-def save_session(name: str, body: SaveSessionBody):
-    services.save_chat_session(name, body.messages)
+def save_session(name: str, body: SaveSessionBody, user: dict = Depends(auth.get_current_user)):
+    services.save_chat_session(user["id"], name, body.messages)
     return {"ok": True}
 
 
 @app.delete("/api/sessions/{name}")
-def delete_session(name: str):
-    services.delete_chat_session(name)
+def delete_session(name: str, user: dict = Depends(auth.get_current_user)):
+    services.delete_chat_session(user["id"], name)
     return {"ok": True}
 
 
@@ -86,11 +143,12 @@ class ChatBody(BaseModel):
 
 
 @app.post("/api/chat/stream")
-def chat_stream(body: ChatBody):
+def chat_stream(body: ChatBody, user: dict = Depends(auth.get_current_user)):
     def generate():
         try:
             for chunk in services.query_openai_api(
                 body.question,
+                user["id"],
                 selected_documents=body.selected_documents or None,
                 image_base64=body.image_base64,
                 image_mime=body.image_mime,
@@ -111,7 +169,7 @@ class ExportBody(BaseModel):
 
 
 @app.post("/api/export/docx")
-def export_docx(body: ExportBody):
+def export_docx(body: ExportBody, user: dict = Depends(auth.get_current_user)):
     buf = services.generate_chat_export_docx(body.messages)
     return Response(
         content=buf.read(),
@@ -121,7 +179,7 @@ def export_docx(body: ExportBody):
 
 
 @app.post("/api/export/pdf")
-def export_pdf(body: ExportBody):
+def export_pdf(body: ExportBody, user: dict = Depends(auth.get_current_user)):
     buf = services.generate_chat_export_pdf(body.messages)
     return Response(
         content=buf.read(),

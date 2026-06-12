@@ -1,5 +1,6 @@
-import { useRef, useState } from 'react'
-import { FileText, Trash2, Loader, ChevronLeft, ChevronRight, ChevronDown } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { FileText, MoreVertical, Pencil, Share2, Trash2, Loader, ChevronLeft, ChevronRight, ChevronDown, LogOut, KeyRound } from 'lucide-react'
+import ChangePasswordModal from './ChangePasswordModal'
 import styles from './Sidebar.module.css'
 
 export default function Sidebar({
@@ -8,6 +9,8 @@ export default function Sidebar({
   onSelectSession,
   onNewChat,
   onDeleteSession,
+  onRenameSession,
+  onShareSession,
   documents,
   activeDocs,
   onSetActiveDocs,
@@ -20,10 +23,49 @@ export default function Sidebar({
   uploadError,
   sidebarOpen,
   onToggleSidebar,
+  username,
+  onLogout,
 }) {
   const fileInputRef = useRef(null)
   const sessionNames = Object.keys(sessions)
   const [filterOpen, setFilterOpen] = useState(false)
+  const [menuOpenFor, setMenuOpenFor] = useState(null)
+  const [renamingSession, setRenamingSession] = useState(null)
+  const [renameValue, setRenameValue] = useState('')
+  const [userMenuOpen, setUserMenuOpen] = useState(false)
+  const [showPasswordModal, setShowPasswordModal] = useState(false)
+  const menuRef = useRef(null)
+  const userMenuRef = useRef(null)
+
+  useEffect(() => {
+    if (!menuOpenFor) return
+    function handleClickOutside(e) {
+      if (menuRef.current && !menuRef.current.contains(e.target)) {
+        setMenuOpenFor(null)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [menuOpenFor])
+
+  useEffect(() => {
+    if (!userMenuOpen) return
+    function handleClickOutside(e) {
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target)) {
+        setUserMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [userMenuOpen])
+
+  function commitRename() {
+    const newName = renameValue.trim()
+    if (newName && newName !== renamingSession) {
+      onRenameSession(renamingSession, newName)
+    }
+    setRenamingSession(null)
+  }
 
   function handleFileChange(e) {
     const file = e.target.files[0]
@@ -72,31 +114,96 @@ export default function Sidebar({
 
           {/* Session list */}
           <nav className={styles.sessionList} aria-label="Chat sessions">
-            {sessionNames.map(name => (
-              <div
-                key={name}
-                className={`${styles.sessionItem} ${name === currentSession ? styles.sessionItemActive : ''}`}
-                onClick={() => onSelectSession(name)}
-                role="button"
-                tabIndex={0}
-                onKeyDown={e => e.key === 'Enter' && onSelectSession(name)}
-                aria-current={name === currentSession ? 'true' : undefined}
-              >
-                <span className={styles.sessionName} title={name}>{name}</span>
-                {sessionNames.length > 1 && (
-                  <button
-                    className={styles.deleteBtn}
-                    aria-label={`Delete ${name}`}
-                    onClick={e => {
-                      e.stopPropagation()
-                      onDeleteSession(name)
-                    }}
-                  >
-                    <Trash2 size={13} />
-                  </button>
-                )}
-              </div>
-            ))}
+            {sessionNames.map(name => {
+              const isRenaming = renamingSession === name
+              return (
+                <div
+                  key={name}
+                  className={`${styles.sessionItem} ${name === currentSession ? styles.sessionItemActive : ''}`}
+                  onClick={() => !isRenaming && onSelectSession(name)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={e => e.key === 'Enter' && !isRenaming && onSelectSession(name)}
+                  aria-current={name === currentSession ? 'true' : undefined}
+                >
+                  {isRenaming ? (
+                    <input
+                      className={styles.renameInput}
+                      value={renameValue}
+                      autoFocus
+                      onClick={e => e.stopPropagation()}
+                      onChange={e => setRenameValue(e.target.value)}
+                      onBlur={commitRename}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') { e.preventDefault(); commitRename() }
+                        if (e.key === 'Escape') { e.preventDefault(); setRenamingSession(null) }
+                      }}
+                    />
+                  ) : (
+                    <span className={styles.sessionName} title={name}>{name}</span>
+                  )}
+
+                  <div className={styles.sessionMenuWrap} ref={menuOpenFor === name ? menuRef : null}>
+                    <button
+                      className={styles.sessionMenuBtn}
+                      aria-label={`More actions for ${name}`}
+                      aria-haspopup="true"
+                      aria-expanded={menuOpenFor === name}
+                      onClick={e => {
+                        e.stopPropagation()
+                        setMenuOpenFor(o => (o === name ? null : name))
+                      }}
+                    >
+                      <MoreVertical size={13} />
+                    </button>
+
+                    {menuOpenFor === name && (
+                      <div className={styles.sessionMenu} role="menu">
+                        <button
+                          className={styles.sessionMenuItem}
+                          role="menuitem"
+                          onClick={e => {
+                            e.stopPropagation()
+                            setRenamingSession(name)
+                            setRenameValue(name)
+                            setMenuOpenFor(null)
+                          }}
+                        >
+                          <Pencil size={13} />
+                          Rename
+                        </button>
+                        <button
+                          className={styles.sessionMenuItem}
+                          role="menuitem"
+                          onClick={e => {
+                            e.stopPropagation()
+                            onShareSession(name)
+                            setMenuOpenFor(null)
+                          }}
+                        >
+                          <Share2 size={13} />
+                          Share
+                        </button>
+                        {sessionNames.length > 1 && (
+                          <button
+                            className={`${styles.sessionMenuItem} ${styles.sessionMenuItemDanger}`}
+                            role="menuitem"
+                            onClick={e => {
+                              e.stopPropagation()
+                              onDeleteSession(name)
+                              setMenuOpenFor(null)
+                            }}
+                          >
+                            <Trash2 size={13} />
+                            Delete
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
           </nav>
 
           <hr className={styles.divider} />
@@ -206,7 +313,51 @@ export default function Sidebar({
               </button>
             )}
           </div>
+
+          {/* User footer */}
+          <div className={styles.userFooter} ref={userMenuRef}>
+            <button
+              className={styles.userTrigger}
+              onClick={() => setUserMenuOpen(o => !o)}
+              aria-haspopup="true"
+              aria-expanded={userMenuOpen}
+            >
+              <span className={styles.username} title={username}>{username}</span>
+              <ChevronDown
+                size={13}
+                className={`${styles.chevron} ${userMenuOpen ? styles.chevronOpen : ''}`}
+              />
+            </button>
+
+            {userMenuOpen && (
+              <div className={styles.userMenu} role="menu">
+                <button
+                  className={styles.userMenuItem}
+                  role="menuitem"
+                  onClick={() => {
+                    setUserMenuOpen(false)
+                    setShowPasswordModal(true)
+                  }}
+                >
+                  <KeyRound size={13} />
+                  Change Password
+                </button>
+                <button
+                  className={`${styles.userMenuItem} ${styles.userMenuItemDanger}`}
+                  role="menuitem"
+                  onClick={onLogout}
+                >
+                  <LogOut size={13} />
+                  Log out
+                </button>
+              </div>
+            )}
+          </div>
         </div>
+      )}
+
+      {showPasswordModal && (
+        <ChangePasswordModal onClose={() => setShowPasswordModal(false)} />
       )}
     </aside>
   )

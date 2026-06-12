@@ -92,10 +92,29 @@
   padding: 32px;
 }
 
-.emptyTitle {
-  font-size: 16px;
+.emptyBrand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.emptyBrandText {
+  font-size: 28px;
   font-weight: 600;
   color: var(--text);
+}
+
+.emptyGreeting {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: -6px;
+}
+
+.emptyTitle {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-2);
 }
 
 .emptySubtitle {

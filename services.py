@@ -1,4 +1,7 @@
 import os, base64, logging, io, json, sqlite3
+from datetime import datetime, timezone
+
+import bcrypt
 
 def _get_api_key() -> str:
     key = os.getenv("OPENAI_API_KEY")
@@ -41,13 +44,15 @@ MAX_TOOL_ITERATIONS = 5
 # 1. VECTOR DATABASE CONNECTION
 # ==========================================
 
-def get_chroma_collection():
+def get_chroma_collection(user_id):
     api_key = _get_api_key()
     openai_ef = embedding_functions.OpenAIEmbeddingFunction(
         api_key=api_key, model_name="text-embedding-3-small"
     )
     client = chromadb.PersistentClient(path=VECTOR_DB_PATH)
-    collection = client.get_or_create_collection(name="corporate_docs", embedding_function=openai_ef)
+    collection = client.get_or_create_collection(
+        name=f"corporate_docs_{user_id}", embedding_function=openai_ef
+    )
     return collection
 
 def chunk_text(text, chunk_size=CHUNK_SIZE, overlap=OVERLAP):
@@ -58,16 +63,16 @@ def chunk_text(text, chunk_size=CHUNK_SIZE, overlap=OVERLAP):
     )
     return splitter.split_text(text)
 
-def clear_db():
+def clear_db(user_id):
     try:
         client = chromadb.PersistentClient(path=VECTOR_DB_PATH)
-        client.delete_collection("corporate_docs")
+        client.delete_collection(f"corporate_docs_{user_id}")
     except Exception as e:
         logger.warning("Could not clear vector DB: %s", e)
 
-def get_all_documents_from_db():
+def get_all_documents_from_db(user_id):
     try:
-        collection = get_chroma_collection()
+        collection = get_chroma_collection(user_id)
         result = collection.get(include=["metadatas"])
         unique_files = {meta["source"] for meta in result["metadatas"] if "source" in meta}
         return {file: "Vectorized" for file in unique_files}
@@ -132,29 +137,33 @@ def _extract_text_from_image(uploaded_file):
     )
     return response.choices[0].message.content
 
-def process_and_save_document(uploaded_file):
+def process_and_save_document(uploaded_file, user_id):
+    """Returns (ok, error_message). error_message is None on success."""
     name = uploaded_file.name
     file_name = name.lower()
 
     try:
-        collection = get_chroma_collection()
+        collection = get_chroma_collection(user_id)
     except Exception as e:
         logger.error("Could not connect to vector database: %s", e)
-        return False
+        return False, "Could not connect to the vector database."
 
     existing = collection.get(where={"source": name})
     if existing["ids"]:
-        return True
+        return True, None
 
     pages_data = []
+    looks_scanned = False
 
     try:
         if file_name.endswith(".pdf"):
             reader = PdfReader(uploaded_file)
             for i, page in enumerate(reader.pages):
                 ext = page.extract_text()
-                if ext:
+                if ext and ext.strip():
                     pages_data.append({"text": ext, "page": i + 1})
+                elif page.images:
+                    looks_scanned = True
 
         elif file_name.endswith(".docx"):
             doc = docx.Document(uploaded_file)
@@ -175,11 +184,18 @@ def process_and_save_document(uploaded_file):
 
     except Exception as e:
         logger.error("File read error for %s: %s", name, e)
-        return False
+        return False, "Could not read the file."
 
     if not pages_data:
+        if looks_scanned:
+            logger.warning("%s appears to be a scanned PDF with no text layer.", name)
+            return False, (
+                "This PDF appears to be scanned (image-only pages, no extractable text). "
+                "Convert its pages to images (PNG/JPG) and upload them individually instead "
+                "— those go through OCR automatically."
+            )
         logger.warning("No text could be extracted from %s.", name)
-        return False
+        return False, "No text could be extracted from this file."
 
     all_chunks, all_metadatas, all_ids = [], [], []
     chunk_id_counter = 0
@@ -196,9 +212,9 @@ def process_and_save_document(uploaded_file):
             collection.add(documents=all_chunks, metadatas=all_metadatas, ids=all_ids)
         except Exception as e:
             logger.error("ChromaDB add error for %s: %s", name, e)
-            return False
+            return False, "Could not save the document to the vector database."
 
-    return True
+    return True, None
 
 # ==========================================
 # 3. QUERYING AND CITATIONS (LANGCHAIN AGENT)
@@ -221,11 +237,19 @@ AGENT_SYSTEM_PROMPT = (
     "excerpt headers. Format citations at the end of the relevant sentence like this: "
     "'\U0001f4dd [Document: X, Page: Y]'. "
     "If the knowledge base has no relevant information, do not hallucinate. Start your "
-    "answer with '\U0001f310 [General Knowledge]:' and answer using your general knowledge."
+    "answer with '\U0001f310 [General Knowledge]:' and answer using your general knowledge.\n\n"
+    "LANGUAGE RULE: Always reply in the same language the user's question is written in, "
+    "regardless of the language of the source documents. Translate any cited content into "
+    "the user's language while preserving the citation.\n\n"
+    "MULTI-DOCUMENT RULE: When an answer draws on multiple documents, never blend their "
+    "information into a single undifferentiated statement. Address each document's "
+    "contribution separately (e.g. in its own sentence or bullet point), each with its own "
+    "'\U0001f4dd [Document: X, Page: Y]' citation, so the user can tell which document each "
+    "piece of information came from."
 )
 
 
-def _build_tools(selected_documents=None):
+def _build_tools(user_id, selected_documents=None):
     def _where_filter():
         if not selected_documents:
             return None
@@ -239,7 +263,7 @@ def _build_tools(selected_documents=None):
         Returns excerpts prefixed with their source file name and page number.
         Use this for any question that might be answered from the user's uploaded documents."""
         try:
-            collection = get_chroma_collection()
+            collection = get_chroma_collection(user_id)
             results = collection.query(
                 query_texts=[query],
                 n_results=N_RESULTS,
@@ -263,7 +287,7 @@ def _build_tools(selected_documents=None):
     @tool
     def list_documents() -> str:
         """List all documents currently stored in the knowledge base."""
-        docs = get_all_documents_from_db()
+        docs = get_all_documents_from_db(user_id)
         if not docs:
             return "The knowledge base is empty."
         return ", ".join(sorted(docs.keys()))
@@ -273,7 +297,7 @@ def _build_tools(selected_documents=None):
         """Retrieve the full text of a specific document so it can be summarized.
         Pass the exact file name as returned by 'list_documents'."""
         try:
-            collection = get_chroma_collection()
+            collection = get_chroma_collection(user_id)
             result = collection.get(where={"source": document_name}, include=["documents", "metadatas"])
         except Exception as e:
             logger.error("ChromaDB get failed: %s", e)
@@ -306,14 +330,14 @@ def _history_to_messages(chat_history):
     return messages
 
 
-def query_openai_api(user_question, selected_documents=None, image_base64=None, image_mime=None, chat_history=None):
+def query_openai_api(user_question, user_id, selected_documents=None, image_base64=None, image_mime=None, chat_history=None):
     api_key = _get_api_key()
 
     has_image = bool(image_base64 and image_mime)
     model = "gpt-4o" if has_image else "gpt-4o-mini"
 
     llm = ChatOpenAI(model=model, api_key=api_key, streaming=True)
-    tools = _build_tools(selected_documents)
+    tools = _build_tools(user_id, selected_documents)
     llm_with_tools = llm.bind_tools(tools)
     llm_force_search = llm.bind_tools(
         tools, tool_choice={"type": "function", "function": {"name": "search_knowledge_base"}}
@@ -432,31 +456,113 @@ def generate_chat_export_pdf(messages):
 def init_chat_db():
     with sqlite3.connect(CHAT_DB_PATH) as conn:
         conn.execute(
-            "CREATE TABLE IF NOT EXISTS chat_sessions "
-            "(session_name TEXT PRIMARY KEY, messages TEXT)"
+            "CREATE TABLE IF NOT EXISTS users ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "username TEXT UNIQUE NOT NULL, "
+            "password_hash TEXT NOT NULL, "
+            "created_at TEXT NOT NULL)"
         )
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS chat_sessions ("
+            "user_id INTEGER NOT NULL, "
+            "session_name TEXT NOT NULL, "
+            "messages TEXT, "
+            "PRIMARY KEY (user_id, session_name))"
+        )
+
+        # Migrate the legacy single-user schema (session_name TEXT PRIMARY KEY,
+        # no user_id) — pre-auth sessions weren't tied to any account, so they
+        # are dropped rather than migrated.
+        cols = [row[1] for row in conn.execute("PRAGMA table_info(chat_sessions)").fetchall()]
+        if "user_id" not in cols:
+            conn.execute("DROP TABLE chat_sessions")
+            conn.execute(
+                "CREATE TABLE chat_sessions ("
+                "user_id INTEGER NOT NULL, "
+                "session_name TEXT NOT NULL, "
+                "messages TEXT, "
+                "PRIMARY KEY (user_id, session_name))"
+            )
+
         conn.commit()
 
-def save_chat_session(session_name, messages):
+def save_chat_session(user_id, session_name, messages):
     with sqlite3.connect(CHAT_DB_PATH) as conn:
         conn.execute(
-            "INSERT OR REPLACE INTO chat_sessions (session_name, messages) VALUES (?, ?)",
-            (session_name, json.dumps(messages))
+            "INSERT OR REPLACE INTO chat_sessions (user_id, session_name, messages) VALUES (?, ?, ?)",
+            (user_id, session_name, json.dumps(messages))
         )
         conn.commit()
 
-def load_all_chat_sessions():
+def load_all_chat_sessions(user_id):
     with sqlite3.connect(CHAT_DB_PATH) as conn:
-        rows = conn.execute("SELECT session_name, messages FROM chat_sessions").fetchall()
+        rows = conn.execute(
+            "SELECT session_name, messages FROM chat_sessions WHERE user_id = ?",
+            (user_id,)
+        ).fetchall()
     return {row[0]: json.loads(row[1]) for row in rows}
 
-def delete_chat_session(session_name):
+def delete_chat_session(user_id, session_name):
     with sqlite3.connect(CHAT_DB_PATH) as conn:
         conn.execute(
-            "DELETE FROM chat_sessions WHERE session_name = ?",
-            (session_name,)
+            "DELETE FROM chat_sessions WHERE user_id = ? AND session_name = ?",
+            (user_id, session_name)
         )
         conn.commit()
+
+# ==========================================
+# 6. USERS (SQLite)
+# ==========================================
+
+def create_user(username, password):
+    password_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    try:
+        with sqlite3.connect(CHAT_DB_PATH) as conn:
+            cur = conn.execute(
+                "INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, ?)",
+                (username, password_hash, datetime.now(timezone.utc).isoformat())
+            )
+            conn.commit()
+            return {"id": cur.lastrowid, "username": username}
+    except sqlite3.IntegrityError:
+        return None
+
+def authenticate_user(username, password):
+    with sqlite3.connect(CHAT_DB_PATH) as conn:
+        row = conn.execute(
+            "SELECT id, username, password_hash FROM users WHERE username = ?",
+            (username,)
+        ).fetchone()
+
+    if row is None:
+        return None
+
+    user_id, db_username, password_hash = row
+    if not bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8")):
+        return None
+    return {"id": user_id, "username": db_username}
+
+def change_password(user_id, current_password, new_password):
+    with sqlite3.connect(CHAT_DB_PATH) as conn:
+        row = conn.execute("SELECT password_hash FROM users WHERE id = ?", (user_id,)).fetchone()
+        if row is None:
+            return False
+
+        if not bcrypt.checkpw(current_password.encode("utf-8"), row[0].encode("utf-8")):
+            return False
+
+        new_hash = bcrypt.hashpw(new_password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+        conn.execute("UPDATE users SET password_hash = ? WHERE id = ?", (new_hash, user_id))
+        conn.commit()
+    return True
+
+def get_user_by_id(user_id):
+    with sqlite3.connect(CHAT_DB_PATH) as conn:
+        row = conn.execute("SELECT id, username FROM users WHERE id = ?", (user_id,)).fetchone()
+    if row is None:
+        return None
+    return {"id": row[0], "username": row[1]}
 
 # Initialize the chat database when the module loads
 init_chat_db()
