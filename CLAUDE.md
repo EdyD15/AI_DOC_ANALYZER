@@ -50,6 +50,7 @@ JWT-based auth. `auth.py` holds the JWT helpers and the `get_current_user` FastA
 - `chat_sessions` is keyed by `(user_id, session_name)`.
 - Frontend stores the token + username in `localStorage` (`api.js`); `App.jsx` renders `AuthPage` (`Login.jsx`/`Register.jsx`) when no token is present, and logs the user out (clearing localStorage and resetting state) on any `AuthError` (401) from the API.
 - **Migration note**: introducing auth was a breaking change to the pre-existing `chat_sessions` table (it had no `user_id`) — old anonymous sessions were dropped on first run after upgrading. The old `corporate_docs` ChromaDB collection (pre-auth) is now orphaned; users need to register an account and re-upload their documents.
+- **Migration note (Postgres)**: accounts created on Railway before `DATABASE_URL` was configured lived in the ephemeral SQLite `chat_history.db`, which is wiped on every redeploy — those accounts were lost when Postgres was introduced as the backing store. Users need to register again.
 
 ## Running with Docker
 
