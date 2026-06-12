@@ -44,7 +44,8 @@ OPENAI_API_KEY = "sk-..."
 JWT-based auth. `auth.py` holds the JWT helpers and the `get_current_user` FastAPI dependency; every route in `api.py` (except `/api/auth/register` and `/api/auth/login`) requires a valid `Authorization: Bearer <token>` header.
 
 - `JWT_SECRET_KEY` env var signs tokens (HS256, 7-day expiry). If unset, `auth.py` falls back to an insecure default and logs a warning — set a real random value locally (`.env`) and on the Railway backend service.
-- `POST /api/auth/register` and `POST /api/auth/login` create/verify users (bcrypt-hashed passwords) in a `users` table in `chat_history.db` and return `{ "access_token": ..., "username": ... }`. `GET /api/auth/me` returns the current user.
+- `POST /api/auth/register` and `POST /api/auth/login` create/verify users (bcrypt-hashed passwords) in a `users` table and return `{ "access_token": ..., "username": ... }`. `GET /api/auth/me` returns the current user.
+- **Database backend**: `services.py` checks `DATABASE_URL` at import time. If set, `users` and `chat_sessions` live in that Postgres database (via `psycopg2`); otherwise they live in a local SQLite file at `chat_history.db`. On Railway, set `DATABASE_URL` to the attached Postgres plugin's connection string — without it, `chat_history.db` is wiped on every redeploy and all accounts/sessions are lost. `init_chat_db()` creates both tables on startup for whichever backend is active.
 - Each user's documents live in their own ChromaDB collection, `corporate_docs_{user_id}` — full isolation by construction, no metadata filtering needed.
 - `chat_sessions` is keyed by `(user_id, session_name)`.
 - Frontend stores the token + username in `localStorage` (`api.js`); `App.jsx` renders `AuthPage` (`Login.jsx`/`Register.jsx`) when no token is present, and logs the user out (clearing localStorage and resetting state) on any `AuthError` (401) from the API.
@@ -68,13 +69,13 @@ Backend and frontend are deployed as **two separate services** in the same Railw
 
 | Service | Root directory | Dockerfile | Env vars |
 |---|---|---|---|
-| backend | `/` (repo root) | `Dockerfile` | `OPENAI_API_KEY`, `JWT_SECRET_KEY`, `ALLOWED_ORIGINS=<frontend-url>` |
+| backend | `/` (repo root) | `Dockerfile` | `OPENAI_API_KEY`, `JWT_SECRET_KEY`, `ALLOWED_ORIGINS=<frontend-url>`, `DATABASE_URL=<postgres-plugin-url>` |
 | frontend | `/frontend` | `frontend/Dockerfile` | `VITE_API_URL=<backend-url>` (build-time) |
 
 - `VITE_API_URL` is read in `frontend/src/api.js` and baked into the static build at build time (passed as a Docker `ARG` in `frontend/Dockerfile`) — set it to the backend's public Railway URL, e.g. `https://aidocanalyzer-production.up.railway.app`. The frontend's nginx only ever serves static files and has no `/api` proxy or upstream — every API call goes straight from the browser to that URL, so there's no `backend` hostname for nginx to resolve.
 - `ALLOWED_ORIGINS` (comma-separated) is read in `api.py` and appended to the CORS allow-list alongside `http://localhost:5173` — set it to the frontend's public Railway URL.
 - Railway sets `PORT` automatically and routes the public domain to whatever port the container listens on at runtime; it does **not** default to 80. The backend Dockerfile's `CMD` binds to `0.0.0.0:8000` — override the start command to `uvicorn api:app --host 0.0.0.0 --port $PORT` if Railway's assigned port differs from 8000. The frontend's nginx is configured via `frontend/nginx.conf.template` (`listen ${PORT};`), rendered at container startup by the base image's envsubst entrypoint script — `frontend/Dockerfile` sets `ENV PORT=80` as a default for local/Docker Compose use, and Railway's injected `PORT` overrides it automatically.
-- `vector_db/` and `chat_history.db` are not persisted on Railway unless a volume is attached to the backend service.
+- `vector_db/` is not persisted on Railway unless a volume is attached to the backend service. `chat_history.db` (users/sessions) is only relevant if `DATABASE_URL` is unset — with it set, users/sessions persist in Postgres across redeploys instead.
 
 ## Architecture
 

@@ -35,6 +35,18 @@ _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 VECTOR_DB_PATH = os.path.join(_BASE_DIR, "vector_db")
 CHAT_DB_PATH = os.path.join(_BASE_DIR, "chat_history.db")
 
+# Users and chat sessions live in Postgres when DATABASE_URL is set (e.g. on
+# Railway, where the local filesystem is wiped on every redeploy), otherwise
+# in a local SQLite file.
+DATABASE_URL = os.environ.get("DATABASE_URL")
+if DATABASE_URL:
+    import psycopg2
+    IntegrityError = psycopg2.IntegrityError
+    logger.info("Using PostgreSQL for users/chat history (DATABASE_URL set)")
+else:
+    IntegrityError = sqlite3.IntegrityError
+    logger.info("Using SQLite for users/chat history at %s", CHAT_DB_PATH)
+
 CHUNK_SIZE = 1000
 OVERLAP = 200
 N_RESULTS = 4
@@ -450,90 +462,144 @@ def generate_chat_export_pdf(messages):
     return byte_io
 
 # ==========================================
-# 5. PERMANENT CHAT HISTORY (SQLite)
+# 5. PERMANENT CHAT HISTORY (Postgres or SQLite)
 # ==========================================
 
+def _db_connect():
+    if DATABASE_URL:
+        return psycopg2.connect(DATABASE_URL)
+    return sqlite3.connect(CHAT_DB_PATH)
+
+def _q(query):
+    # sqlite3 uses "?" placeholders, psycopg2 uses "%s"
+    return query.replace("?", "%s") if DATABASE_URL else query
+
 def init_chat_db():
-    with sqlite3.connect(CHAT_DB_PATH) as conn:
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS users ("
-            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
-            "username TEXT UNIQUE NOT NULL, "
-            "password_hash TEXT NOT NULL, "
-            "created_at TEXT NOT NULL)"
-        )
+    conn = _db_connect()
+    try:
+        cur = conn.cursor()
 
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS chat_sessions ("
-            "user_id INTEGER NOT NULL, "
-            "session_name TEXT NOT NULL, "
-            "messages TEXT, "
-            "PRIMARY KEY (user_id, session_name))"
-        )
-
-        # Migrate the legacy single-user schema (session_name TEXT PRIMARY KEY,
-        # no user_id) — pre-auth sessions weren't tied to any account, so they
-        # are dropped rather than migrated.
-        cols = [row[1] for row in conn.execute("PRAGMA table_info(chat_sessions)").fetchall()]
-        if "user_id" not in cols:
-            conn.execute("DROP TABLE chat_sessions")
-            conn.execute(
-                "CREATE TABLE chat_sessions ("
+        if DATABASE_URL:
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS users ("
+                "id SERIAL PRIMARY KEY, "
+                "username TEXT UNIQUE NOT NULL, "
+                "password_hash TEXT NOT NULL, "
+                "created_at TEXT NOT NULL)"
+            )
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS chat_sessions ("
+                "user_id INTEGER NOT NULL, "
+                "session_name TEXT NOT NULL, "
+                "messages TEXT, "
+                "PRIMARY KEY (user_id, session_name))"
+            )
+        else:
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS users ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                "username TEXT UNIQUE NOT NULL, "
+                "password_hash TEXT NOT NULL, "
+                "created_at TEXT NOT NULL)"
+            )
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS chat_sessions ("
                 "user_id INTEGER NOT NULL, "
                 "session_name TEXT NOT NULL, "
                 "messages TEXT, "
                 "PRIMARY KEY (user_id, session_name))"
             )
 
+            # Migrate the legacy single-user schema (session_name TEXT PRIMARY KEY,
+            # no user_id) — pre-auth sessions weren't tied to any account, so they
+            # are dropped rather than migrated.
+            cols = [row[1] for row in cur.execute("PRAGMA table_info(chat_sessions)").fetchall()]
+            if "user_id" not in cols:
+                cur.execute("DROP TABLE chat_sessions")
+                cur.execute(
+                    "CREATE TABLE chat_sessions ("
+                    "user_id INTEGER NOT NULL, "
+                    "session_name TEXT NOT NULL, "
+                    "messages TEXT, "
+                    "PRIMARY KEY (user_id, session_name))"
+                )
+
         conn.commit()
+    finally:
+        conn.close()
 
 def save_chat_session(user_id, session_name, messages):
-    with sqlite3.connect(CHAT_DB_PATH) as conn:
-        conn.execute(
-            "INSERT OR REPLACE INTO chat_sessions (user_id, session_name, messages) VALUES (?, ?, ?)",
+    conn = _db_connect()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            _q(
+                "INSERT INTO chat_sessions (user_id, session_name, messages) VALUES (?, ?, ?) "
+                "ON CONFLICT (user_id, session_name) DO UPDATE SET messages = excluded.messages"
+            ),
             (user_id, session_name, json.dumps(messages))
         )
         conn.commit()
+    finally:
+        conn.close()
 
 def load_all_chat_sessions(user_id):
-    with sqlite3.connect(CHAT_DB_PATH) as conn:
-        rows = conn.execute(
-            "SELECT session_name, messages FROM chat_sessions WHERE user_id = ?",
-            (user_id,)
-        ).fetchall()
+    conn = _db_connect()
+    try:
+        cur = conn.cursor()
+        cur.execute(_q("SELECT session_name, messages FROM chat_sessions WHERE user_id = ?"), (user_id,))
+        rows = cur.fetchall()
+    finally:
+        conn.close()
     return {row[0]: json.loads(row[1]) for row in rows}
 
 def delete_chat_session(user_id, session_name):
-    with sqlite3.connect(CHAT_DB_PATH) as conn:
-        conn.execute(
-            "DELETE FROM chat_sessions WHERE user_id = ? AND session_name = ?",
-            (user_id, session_name)
-        )
+    conn = _db_connect()
+    try:
+        cur = conn.cursor()
+        cur.execute(_q("DELETE FROM chat_sessions WHERE user_id = ? AND session_name = ?"), (user_id, session_name))
         conn.commit()
+    finally:
+        conn.close()
 
 # ==========================================
-# 6. USERS (SQLite)
+# 6. USERS (Postgres or SQLite)
 # ==========================================
 
 def create_user(username, password):
     password_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    created_at = datetime.now(timezone.utc).isoformat()
+    conn = _db_connect()
     try:
-        with sqlite3.connect(CHAT_DB_PATH) as conn:
-            cur = conn.execute(
-                "INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, ?)",
-                (username, password_hash, datetime.now(timezone.utc).isoformat())
+        cur = conn.cursor()
+        if DATABASE_URL:
+            cur.execute(
+                "INSERT INTO users (username, password_hash, created_at) VALUES (%s, %s, %s) RETURNING id",
+                (username, password_hash, created_at)
             )
-            conn.commit()
-            return {"id": cur.lastrowid, "username": username}
-    except sqlite3.IntegrityError:
+            new_id = cur.fetchone()[0]
+        else:
+            cur.execute(
+                "INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, ?)",
+                (username, password_hash, created_at)
+            )
+            new_id = cur.lastrowid
+        conn.commit()
+        return {"id": new_id, "username": username}
+    except IntegrityError:
+        conn.rollback()
         return None
+    finally:
+        conn.close()
 
 def authenticate_user(username, password):
-    with sqlite3.connect(CHAT_DB_PATH) as conn:
-        row = conn.execute(
-            "SELECT id, username, password_hash FROM users WHERE username = ?",
-            (username,)
-        ).fetchone()
+    conn = _db_connect()
+    try:
+        cur = conn.cursor()
+        cur.execute(_q("SELECT id, username, password_hash FROM users WHERE username = ?"), (username,))
+        row = cur.fetchone()
+    finally:
+        conn.close()
 
     if row is None:
         return None
@@ -544,8 +610,11 @@ def authenticate_user(username, password):
     return {"id": user_id, "username": db_username}
 
 def change_password(user_id, current_password, new_password):
-    with sqlite3.connect(CHAT_DB_PATH) as conn:
-        row = conn.execute("SELECT password_hash FROM users WHERE id = ?", (user_id,)).fetchone()
+    conn = _db_connect()
+    try:
+        cur = conn.cursor()
+        cur.execute(_q("SELECT password_hash FROM users WHERE id = ?"), (user_id,))
+        row = cur.fetchone()
         if row is None:
             return False
 
@@ -553,13 +622,20 @@ def change_password(user_id, current_password, new_password):
             return False
 
         new_hash = bcrypt.hashpw(new_password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
-        conn.execute("UPDATE users SET password_hash = ? WHERE id = ?", (new_hash, user_id))
+        cur.execute(_q("UPDATE users SET password_hash = ? WHERE id = ?"), (new_hash, user_id))
         conn.commit()
-    return True
+        return True
+    finally:
+        conn.close()
 
 def get_user_by_id(user_id):
-    with sqlite3.connect(CHAT_DB_PATH) as conn:
-        row = conn.execute("SELECT id, username FROM users WHERE id = ?", (user_id,)).fetchone()
+    conn = _db_connect()
+    try:
+        cur = conn.cursor()
+        cur.execute(_q("SELECT id, username FROM users WHERE id = ?"), (user_id,))
+        row = cur.fetchone()
+    finally:
+        conn.close()
     if row is None:
         return None
     return {"id": row[0], "username": row[1]}
